@@ -162,14 +162,29 @@ const CONFIG = {
   finaleMultiplier: 0.35,    // 高潮期间隔缩短比例
 
   // ---- 花朵绽放 ----
-  flowerSpawnInterval: 200,  // 花朵生成间隔（帧）
-  flowerMaxCount: 6,         // 屏幕上最多同时存在的花朵数
-  flowerBloomTime: 90,       // 花朵绽放总时长（帧）
-  flowerHoldTime: 240,       // 花朵盛开停留时长（帧）
-  flowerFadeTime: 120,       // 花朵淡出时长（帧）
-  flowerSizeMin: 35,         // 花朵最小尺寸
-  flowerSizeMax: 70,         // 花朵最大尺寸
-  flowerBottomMargin: 0.15,  // 花朵距底部最小距离（屏幕比例）
+  flowerSpawnInterval: 180,  // 花朵生成间隔（帧）
+  flowerMaxCount: 4,         // 屏幕上最多同时存在的花朵数（中心区域不宜过多）
+  flowerBloomTime: 100,      // 花朵绽放总时长（帧）
+  flowerHoldTime: 280,       // 花朵盛开停留时长（帧）
+  flowerFadeTime: 140,       // 花朵淡出时长（帧）
+  flowerSizeMin: 40,         // 花朵最小尺寸
+  flowerSizeMax: 80,         // 花朵最大尺寸
+  flowerCenterRangeX: 0.25,  // 花朵水平分布范围（中心±比例）
+  flowerCenterRangeY: 0.18,  // 花朵垂直分布范围（中心±比例）
+
+  // ---- 花朵立体感 ----
+  petalShadowBlur: 8,        // 花瓣阴影模糊（立体感）
+  petalShadowAlpha: 0.35,    // 花瓣阴影透明度
+  petal3DTilt: 0.15,         // 花瓣3D倾斜幅度（透视压缩）
+
+  // ---- 花朵环绕粒子 ----
+  orbitParticleCount: 16,    // 每朵花的环绕粒子数
+  orbitRadiusMin: 0.7,       // 轨道最小半径（花朵尺寸倍数）
+  orbitRadiusMax: 1.4,       // 轨道最大半径（花朵尺寸倍数）
+  orbitSpeedMin: 0.008,      // 最慢公转角速度
+  orbitSpeedMax: 0.025,      // 最快公转角速度
+  orbitParticleSize: 1.8,    // 环绕粒子半径
+  orbitGlow: 10,             // 环绕粒子辉光
 
   // ---- 鼠标交互 ----
   clickSparkCount: 45,       // 点击烟花粒子数
@@ -578,6 +593,20 @@ class Flower {
 
     // 根据花型初始化花瓣配置
     this.petals = this.createPetals();
+
+    // 初始化环绕粒子：椭圆轨道，不同速度/相位/半径
+    this.orbitParticles = [];
+    for (let i = 0; i < CONFIG.orbitParticleCount; i++) {
+      this.orbitParticles.push({
+        angle: rand(0, Math.PI * 2),
+        radius: this.size * rand(CONFIG.orbitRadiusMin, CONFIG.orbitRadiusMax),
+        speed: rand(CONFIG.orbitSpeedMin, CONFIG.orbitSpeedMax) * (Math.random() < 0.3 ? -1 : 1),
+        eccentricity: rand(0.5, 1.0), // 椭圆离心率（0=圆，1=扁）
+        size: rand(CONFIG.orbitParticleSize * 0.6, CONFIG.orbitParticleSize * 1.3),
+        phase: rand(0, Math.PI * 2),
+        twinkleSpeed: rand(0.05, 0.12),
+      });
+    }
   }
 
   /** 根据花型创建花瓣参数列表 */
@@ -633,6 +662,12 @@ class Flower {
     if (!this.active) return;
     this.age++;
     if (this.age >= this.totalLife) this.active = false;
+    // 更新环绕粒子角度
+    if (this.orbitParticles) {
+      for (const op of this.orbitParticles) {
+        op.angle += op.speed;
+      }
+    }
   }
 
   /** 计算单瓣花瓣的绽放进度（带延迟和弹性） */
@@ -643,17 +678,21 @@ class Flower {
     return easeOutElastic(t);
   }
 
-  /** 计算整朵花的透明度（绽放渐入 / 停留 / 淡出） */
+  /** 计算整朵花的透明度（柔和淡入 / 呼吸停留 / 温柔淡出） */
   getAlpha() {
+    // 淡入阶段：easeOutCubic 从透明到完全显现
     if (this.age < CONFIG.flowerBloomTime) {
       return easeOutCubic(this.age / CONFIG.flowerBloomTime);
     }
     const fadeStart = CONFIG.flowerBloomTime + CONFIG.flowerHoldTime;
+    // 淡出阶段：easeInOutQuad 温柔消失
     if (this.age > fadeStart) {
       const t = (this.age - fadeStart) / CONFIG.flowerFadeTime;
       return Math.max(0, 1 - easeInOutQuad(t));
     }
-    return 1;
+    // 停留阶段：微妙的呼吸效果（±6%透明度波动），仿佛花朵在呼吸
+    const holdAge = this.age - CONFIG.flowerBloomTime;
+    return 0.94 + 0.06 * Math.sin(holdAge * 0.03);
   }
 
   draw(ctx) {
@@ -665,7 +704,10 @@ class Flower {
     ctx.translate(this.x, this.y);
     ctx.globalAlpha = alpha;
 
-    // 逐瓣绘制（从外层到内层，使内层花瓣覆盖在上方）
+    // ---- 第一层：环绕粒子的后半圈（在花朵后方，营造3D包裹感）----
+    this.drawOrbitParticles(ctx, true);
+
+    // ---- 第二层：花瓣（从外层到内层，内层覆盖在外层上方）----
     const sorted = [...this.petals].sort((a, b) => (b.layer || 0) - (a.layer || 0));
 
     for (const petal of sorted) {
@@ -679,6 +721,10 @@ class Flower {
       const openRotation = -Math.PI / 2 + (Math.PI / 2) * progress;
       ctx.rotate(openRotation);
 
+      // 3D透视：花瓣宽度随开放程度轻微压缩，模拟立体翻折
+      const tiltScale = 1 - CONFIG.petal3DTilt * (1 - progress);
+      ctx.scale(tiltScale, 1);
+
       const petalLength = petal.length * progress;
       const petalWidth = petal.width * (0.3 + 0.7 * progress);
 
@@ -686,89 +732,189 @@ class Flower {
       ctx.restore();
     }
 
-    // 花蕊：金色细小光点
+    // ---- 第三层：花蕊（凸起于花瓣之上）----
     this.drawCenter(ctx);
+
+    // ---- 第四层：环绕粒子的前半圈（在花朵前方，完成3D环绕）----
+    this.drawOrbitParticles(ctx, false);
 
     ctx.restore();
     ctx.globalAlpha = 1;
   }
 
-  /** 绘制单片花瓣 —— 贝塞尔曲线，丝绒/薄纱质感 */
+  /** 绘制单片花瓣 —— 立体径向渐变 + 投影 + 层次明暗 */
   drawPetal(ctx, length, width, petal) {
     const { petal: baseColor, petalEdge } = this.colorSet;
+    const layer = petal.layer || 0;
+    // 内层花瓣颜色更深更饱和，外层更亮更通透，产生立体层次
+    const layerDarken = 1 - layer * 0.12;
+    const layerAlpha = 0.75 + layer * 0.08;
 
-    // 花瓣渐变：基部深 → 边缘浅，营造透光感
-    const grad = ctx.createLinearGradient(0, 0, 0, -length);
-    grad.addColorStop(0, hexToRgba(petalEdge, 0.9));
-    grad.addColorStop(0.5, hexToRgba(baseColor, 0.85));
-    grad.addColorStop(1, hexToRgba(baseColor, 0.6));
+    // ---- 花瓣投影（偏移右下方，营造悬浮立体感）----
+    ctx.save();
+    ctx.translate(2, 3);
+    ctx.shadowBlur = CONFIG.petalShadowBlur;
+    ctx.shadowColor = `rgba(0, 0, 0, ${CONFIG.petalShadowAlpha})`;
+    ctx.beginPath();
+    this.petalPath(ctx, length, width, petal);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+    ctx.fill();
+    ctx.restore();
+
+    // ---- 花瓣主体：径向渐变模拟光照（基部暗→中部亮→尖端微暗）----
+    const grad = ctx.createRadialGradient(0, -length * 0.1, 0, 0, -length * 0.4, length);
+    grad.addColorStop(0, hexToRgba(this.darkenColor(petalEdge, layerDarken), layerAlpha));
+    grad.addColorStop(0.4, hexToRgba(this.darkenColor(baseColor, layerDarken), layerAlpha + 0.1));
+    grad.addColorStop(0.75, hexToRgba(baseColor, layerAlpha - 0.05));
+    grad.addColorStop(1, hexToRgba(petalEdge, layerAlpha - 0.25));
 
     ctx.fillStyle = grad;
     ctx.beginPath();
+    this.petalPath(ctx, length, width, petal);
+    ctx.fill();
 
+    // ---- 花瓣左侧受光面高光（模拟光源从左上方照射）----
+    ctx.save();
+    ctx.beginPath();
+    this.petalPath(ctx, length, width, petal);
+    ctx.clip();
+    const highlightGrad = ctx.createLinearGradient(-width, 0, width * 0.3, 0);
+    highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
+    highlightGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.06)');
+    highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = highlightGrad;
+    ctx.fillRect(-width, -length, width * 1.5, length * 1.2);
+    ctx.restore();
+
+    // ---- 花瓣边缘透光描边 ----
+    ctx.strokeStyle = hexToRgba('#FFFFFF', 0.2);
+    ctx.lineWidth = 0.5;
+    ctx.beginPath();
+    this.petalPath(ctx, length, width, petal);
+    ctx.stroke();
+
+    // ---- 花瓣脉络（从基部放射，增加真实感）----
+    ctx.strokeStyle = hexToRgba(petalEdge, 0.18);
+    ctx.lineWidth = 0.35;
+    for (let v = -1; v <= 1; v += 1) {
+      ctx.beginPath();
+      ctx.moveTo(0, -length * 0.05);
+      ctx.quadraticCurveTo(
+        width * 0.15 * v, -length * 0.45,
+        width * 0.1 * v, -length * 0.85
+      );
+      ctx.stroke();
+    }
+  }
+
+  /** 花瓣路径（复用，避免重复代码） */
+  petalPath(ctx, length, width, petal) {
     if (petal.notch) {
       // 樱花花瓣：尖端有凹缺
       ctx.moveTo(0, 0);
       ctx.bezierCurveTo(width * 0.8, -length * 0.15, width, -length * 0.6, width * 0.5, -length * 0.9);
-      ctx.lineTo(0, -length * 0.75); // 凹缺
+      ctx.lineTo(0, -length * 0.75);
       ctx.lineTo(-width * 0.5, -length * 0.9);
       ctx.bezierCurveTo(-width, -length * 0.6, -width * 0.8, -length * 0.15, 0, 0);
     } else {
-      // 通用花瓣：圆润的贝塞尔曲线
+      // 通用花瓣：圆润贝塞尔曲线
       ctx.moveTo(0, 0);
-      ctx.bezierCurveTo(
-        width, -length * 0.2,
-        width * 0.7, -length * 0.85,
-        0, -length
-      );
-      ctx.bezierCurveTo(
-        -width * 0.7, -length * 0.85,
-        -width, -length * 0.2,
-        0, 0
-      );
+      ctx.bezierCurveTo(width, -length * 0.2, width * 0.7, -length * 0.85, 0, -length);
+      ctx.bezierCurveTo(-width * 0.7, -length * 0.85, -width, -length * 0.2, 0, 0);
     }
-    ctx.fill();
-
-    // 花瓣边缘高光（薄纱透光感）
-    ctx.strokeStyle = hexToRgba('#FFFFFF', 0.25);
-    ctx.lineWidth = 0.6;
-    ctx.stroke();
-
-    // 花瓣脉络（极细线条，增加丝绒质感）
-    ctx.strokeStyle = hexToRgba(petalEdge, 0.2);
-    ctx.lineWidth = 0.4;
-    ctx.beginPath();
-    ctx.moveTo(0, -length * 0.05);
-    ctx.quadraticCurveTo(width * 0.05, -length * 0.5, 0, -length * 0.9);
-    ctx.stroke();
   }
 
-  /** 绘制花蕊：金色光点环 */
+  /** 将十六进制颜色按系数调暗（0-1，越小越暗） */
+  darkenColor(hex, factor) {
+    const r = Math.min(255, Math.round(parseInt(hex.slice(1, 3), 16) * factor));
+    const g = Math.min(255, Math.round(parseInt(hex.slice(3, 5), 16) * factor));
+    const b = Math.min(255, Math.round(parseInt(hex.slice(5, 7), 16) * factor));
+    return `rgb(${r},${g},${b})`;
+  }
+
+  /** 绘制花蕊 —— 立体凸起（径向渐变 + 高光 + 错落光点） */
   drawCenter(ctx) {
     const bloomProgress = Math.min(this.age / CONFIG.flowerBloomTime, 1);
-    const centerSize = this.size * 0.18 * bloomProgress;
+    const centerSize = this.size * 0.2 * bloomProgress;
     if (centerSize <= 0) return;
 
     const { center } = this.colorSet;
 
-    // 花蕊基座
-    ctx.fillStyle = hexToRgba(center, 0.8);
+    // 花蕊基座阴影（凸起感）
+    ctx.save();
+    ctx.shadowBlur = centerSize * 0.8;
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 2;
+    // 径向渐变：中心亮白 → 金色 → 暗边，模拟半球凸起
+    const centerGrad = ctx.createRadialGradient(
+      -centerSize * 0.25, -centerSize * 0.25, 0,
+      0, 0, centerSize
+    );
+    centerGrad.addColorStop(0, '#FFF8DC');
+    centerGrad.addColorStop(0.35, center);
+    centerGrad.addColorStop(0.8, this.darkenColor(center, 0.7));
+    centerGrad.addColorStop(1, this.darkenColor(center, 0.4));
+    ctx.fillStyle = centerGrad;
     ctx.beginPath();
     ctx.arc(0, 0, centerSize, 0, Math.PI * 2);
     ctx.fill();
+    ctx.restore();
 
-    // 金色光点环绕
-    const dotCount = this.type === 'daisy' ? 12 : 8;
+    // 高光点（左上方镜面反射，增强立体）
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.beginPath();
+    ctx.arc(-centerSize * 0.3, -centerSize * 0.3, centerSize * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 金色光点环：错落大小，远近层次
+    const dotCount = this.type === 'daisy' ? 14 : 10;
     for (let i = 0; i < dotCount; i++) {
-      const angle = (Math.PI * 2 * i) / dotCount + this.age * 0.005;
-      const r = centerSize * 0.6;
+      const angle = (Math.PI * 2 * i) / dotCount + this.age * 0.004;
+      const r = centerSize * (0.5 + (i % 3) * 0.18); // 三种半径错落
       const dx = Math.cos(angle) * r;
       const dy = Math.sin(angle) * r;
-      const twinkle = 0.6 + 0.4 * Math.sin(this.age * 0.08 + i);
-      ctx.fillStyle = hexToRgba('#FFEC8B', twinkle);
+      const twinkle = 0.5 + 0.5 * Math.sin(this.age * 0.07 + i * 1.3);
+      const dotSize = centerSize * (0.12 + (i % 2) * 0.06);
+      ctx.fillStyle = hexToRgba('#FFEC8B', 0.7 + twinkle * 0.3);
       ctx.beginPath();
-      ctx.arc(dx, dy, centerSize * 0.2, 0, Math.PI * 2);
+      ctx.arc(dx, dy, dotSize, 0, Math.PI * 2);
       ctx.fill();
+    }
+  }
+
+  /**
+   * 绘制环绕粒子 —— 椭圆轨道公转，分前后两半营造3D包裹感
+   * @param {boolean} behind - true=绘制后方粒子，false=绘制前方粒子
+   */
+  drawOrbitParticles(ctx, behind) {
+    if (!this.orbitParticles) return;
+    const bloomProgress = Math.min(this.age / CONFIG.flowerBloomTime, 1);
+    if (bloomProgress <= 0) return;
+
+    for (const op of this.orbitParticles) {
+      // 椭圆坐标：x = r*cos(angle), y = r*eccentricity*sin(angle)
+      const px = Math.cos(op.angle) * op.radius;
+      const py = Math.sin(op.angle) * op.radius * op.eccentricity;
+      const isBehind = Math.sin(op.angle) < 0;
+
+      // 只绘制对应层（前/后）
+      if (behind !== isBehind) continue;
+
+      // 后方粒子更暗更小，前方粒子更亮更大，增强景深
+      const depthScale = isBehind ? 0.6 : 1.0;
+      const depthAlpha = isBehind ? 0.4 : 0.85;
+      const twinkle = 0.5 + 0.5 * Math.sin(this.age * op.twinkleSpeed + op.phase);
+      const alpha = depthAlpha * twinkle * bloomProgress;
+
+      ctx.save();
+      ctx.shadowBlur = CONFIG.orbitGlow * depthScale;
+      ctx.shadowColor = this.colorSet.petalEdge;
+      ctx.fillStyle = hexToRgba(this.colorSet.petalEdge, alpha);
+      ctx.beginPath();
+      ctx.arc(px, py, op.size * depthScale, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
     }
   }
 }
@@ -921,7 +1067,7 @@ function spawnAutoFirework() {
   fw.launch(x, targetY, colorSet, false);
 }
 
-/** 绽放一朵花（位置随机但构图平衡） */
+/** 绽放一朵花（在页面中心附近随机出现，构图平衡） */
 function spawnFlower() {
   const activeFlowers = flowerPool.filter(f => f.active).length;
   if (activeFlowers >= CONFIG.flowerMaxCount) return;
@@ -929,14 +1075,15 @@ function spawnFlower() {
   const flower = getFlower();
   if (!flower) return;
 
-  // 构图平衡：底部区域为主，偶尔在中部
-  const useBottom = Math.random() < 0.7;
-  const x = useBottom
-    ? rand(W * 0.08, W * 0.92)
-    : rand(W * 0.15, W * 0.85);
-  const y = useBottom
-    ? rand(H * (1 - CONFIG.flowerBottomMargin - 0.1), H * (1 - CONFIG.flowerBottomMargin))
-    : rand(H * 0.4, H * 0.65);
+  // 中心附近随机分布：水平±25%，垂直±18%，避免重叠
+  const cx = W / 2;
+  const cy = H / 2;
+  let x, y, attempts = 0;
+  do {
+    x = cx + rand(-W * CONFIG.flowerCenterRangeX, W * CONFIG.flowerCenterRangeX);
+    y = cy + rand(-H * CONFIG.flowerCenterRangeY, H * CONFIG.flowerCenterRangeY);
+    attempts++;
+  } while (attempts < 8 && flowerPool.some(f => f.active && Math.hypot(f.x - x, f.y - y) < 120));
 
   const type = pick(['rose', 'sakura', 'daisy']);
   const colorSet = pick(FLOWER_COLORS);
