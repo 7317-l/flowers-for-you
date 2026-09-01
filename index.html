@@ -179,8 +179,8 @@ const CONFIG = {
 
   // ---- 花朵环绕粒子 ----
   orbitParticleCount: 16,    // 每朵花的环绕粒子数
-  orbitRadiusMin: 0.7,       // 轨道最小半径（花朵尺寸倍数）
-  orbitRadiusMax: 1.4,       // 轨道最大半径（花朵尺寸倍数）
+  orbitRadiusMin: 1.1,       // 轨道最小半径（花朵尺寸倍数，确保粒子在花朵外围不进中心）
+  orbitRadiusMax: 1.7,       // 轨道最大半径（花朵尺寸倍数）
   orbitSpeedMin: 0.008,      // 最慢公转角速度
   orbitSpeedMax: 0.025,      // 最快公转角速度
   orbitParticleSize: 1.8,    // 环绕粒子半径
@@ -193,15 +193,32 @@ const CONFIG = {
   mouseTrailLife: 30,        // 鼠标拖尾粒子寿命
 };
 
-/* ---- 烟花配色：暖金、玫瑰粉、香槟橙、宝石红，点缀冰蓝与薰衣草紫 ---- */
+/* ---- 烟花配色：暖金/玫瑰粉/香槟橙/宝石红 + 大量蓝绿冷色系 ---- */
 const FIREWORK_COLORS = [
+  // 暖色系（4种）
   { core: '#FFFFFF', mid: '#FFD700', edge: '#FFA500' },  // 暖金
   { core: '#FFFFFF', mid: '#FF6B9D', edge: '#E63946' },  // 玫瑰粉
   { core: '#FFFFFF', mid: '#FFB347', edge: '#FF8C42' },  // 香槟橙
   { core: '#FFFFFF', mid: '#E63946', edge: '#B71C1C' },  // 宝石红
-  { core: '#FFFFFF', mid: '#A8D8EA', edge: '#5DADE2' },  // 冰蓝（点缀）
-  { core: '#FFFFFF', mid: '#B388EB', edge: '#7C4DFF' },  // 薰衣草紫（点缀）
+  // 蓝色系（4种）
+  { core: '#FFFFFF', mid: '#A8D8EA', edge: '#5DADE2' },  // 冰蓝
+  { core: '#FFFFFF', mid: '#54A0FF', edge: '#2E86DE' },  // 天蓝
+  { core: '#FFFFFF', mid: '#3498DB', edge: '#1B4F72' },  // 宝蓝
+  { core: '#FFFFFF', mid: '#74B9FF', edge: '#0984E3' },  // 青蓝
+  // 绿色系（4种）
+  { core: '#FFFFFF', mid: '#55EFC4', edge: '#00B894' },  // 薄荷绿
+  { core: '#FFFFFF', mid: '#2ECC71', edge: '#1E8449' },  // 翠绿
+  { core: '#FFFFFF', mid: '#00CEC9', edge: '#008B8B' },  // 青绿
+  { core: '#FFFFFF', mid: '#81ECEC', edge: '#00ABB3' },  // 湖绿
+  // 紫色系（1种）
+  { core: '#FFFFFF', mid: '#B388EB', edge: '#7C4DFF' },  // 薰衣草紫
 ];
+
+/* 烟花配色分组，用于按比例抽取 */
+const FW_WARM = FIREWORK_COLORS.slice(0, 4);
+const FW_BLUE = FIREWORK_COLORS.slice(4, 8);
+const FW_GREEN = FIREWORK_COLORS.slice(8, 12);
+const FW_PURPLE = FIREWORK_COLORS.slice(12, 13);
 
 /* ---- 花朵配色：奶油白、樱花粉、淡鹅黄、香芋紫 ---- */
 const FLOWER_COLORS = [
@@ -1060,10 +1077,18 @@ function spawnAutoFirework() {
   if (!fw) return;
   const x = rand(W * 0.1, W * 0.9);
   const targetY = rand(H * CONFIG.explosionHeightMin, H * CONFIG.explosionHeightMax);
-  // 70% 暖色系，30% 冷色系点缀
-  const colorSet = Math.random() < 0.7
-    ? pick(FIREWORK_COLORS.slice(0, 4))
-    : pick(FIREWORK_COLORS);
+  // 配色比例：蓝色35% + 绿色35% + 暖色25% + 紫色5%
+  const r = Math.random();
+  let colorSet;
+  if (r < 0.35) {
+    colorSet = pick(FW_BLUE);
+  } else if (r < 0.70) {
+    colorSet = pick(FW_GREEN);
+  } else if (r < 0.95) {
+    colorSet = pick(FW_WARM);
+  } else {
+    colorSet = pick(FW_PURPLE);
+  }
   fw.launch(x, targetY, colorSet, false);
 }
 
