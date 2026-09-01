@@ -154,8 +154,8 @@ const CONFIG = {
   explosionHeightMax: 0.55,  // 爆炸最高高度（屏幕高度比例）
 
   // ---- 爆炸粒子 ----
-  sparkCountMin: 70,         // 单次爆炸最少粒子数
-  sparkCountMax: 130,        // 单次爆炸最多粒子数
+  sparkCountMin: 55,         // 单次爆炸最少粒子数
+  sparkCountMax: 100,        // 单次爆炸最多粒子数
   sparkSpeedMin: 2.5,        // 粒子初速度下限
   sparkSpeedMax: 6.5,        // 粒子初速度上限
   sparkGravity: 0.035,       // 爆炸粒子重力（缓慢飘落）
@@ -165,7 +165,7 @@ const CONFIG = {
   sparkSizeMin: 1.2,         // 粒子最小半径
   sparkSizeMax: 2.8,         // 粒子最大半径
   sparkTwinkleChance: 0.35,  // 粒子闪烁概率
-  sparkGlow: 12,             // 粒子辉光半径（shadowBlur）
+  sparkGlow: 8,              // 粒子辉光半径（径向渐变，非shadowBlur）
 
   // ---- 中心闪光 ----
   flashRadius: 60,           // 爆炸瞬间中心闪光半径
@@ -210,7 +210,7 @@ const CONFIG = {
   orbitSpeedMin: 0.008,      // 最慢公转角速度
   orbitSpeedMax: 0.025,      // 最快公转角速度
   orbitParticleSize: 1.8,    // 环绕粒子半径
-  orbitGlow: 10,             // 环绕粒子辉光
+  orbitGlow: 7,              // 环绕粒子辉光（径向渐变）
 
   // ---- 鼠标交互 ----
   clickSparkCount: 45,       // 点击烟花粒子数
@@ -348,39 +348,50 @@ class Particle {
 
   draw(ctx) {
     if (!this.active) return;
-    // 寿命比例：1 = 刚出生，0 = 即将消失
     const lifeRatio = this.life / this.maxLife;
 
-    // 闪烁效果：部分粒子在生命周期内明暗交替
+    // 闪烁效果
     let alpha = lifeRatio;
     if (this.twinkle) {
       alpha *= 0.5 + 0.5 * Math.sin(this.twinklePhase + this.life * 0.15);
     }
+    alpha = Math.max(0, alpha);
 
-    // 闪光类型：半径随寿命快速衰减
+    // 闪光类型：径向渐变快速衰减（无需shadowBlur）
     if (this.type === 'flash') {
       const flashAlpha = lifeRatio * 0.6;
-      const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, this.size * lifeRatio);
+      const r = this.size * lifeRatio;
+      const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, r);
       grad.addColorStop(0, `rgba(255,255,255,${flashAlpha})`);
       grad.addColorStop(0.3, hexToRgba(this.color, flashAlpha * 0.5));
       grad.addColorStop(1, 'rgba(0,0,0,0)');
       ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(this.x, this.y, this.size * lifeRatio, 0, Math.PI * 2);
+      ctx.arc(this.x, this.y, r, 0, Math.PI * 2);
       ctx.fill();
       return;
     }
 
-    // 普通粒子：带辉光的圆点
+    const radius = this.size * (0.6 + 0.4 * lifeRatio);
+
+    // 用径向渐变模拟辉光，替代昂贵的shadowBlur（性能提升5-10倍）
     if (this.glow > 0) {
-      ctx.shadowBlur = this.glow;
-      ctx.shadowColor = this.color;
+      const glowR = radius + this.glow * 0.6;
+      const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, glowR);
+      grad.addColorStop(0, hexToRgba(this.color, alpha));
+      grad.addColorStop(0.35, hexToRgba(this.color, alpha * 0.5));
+      grad.addColorStop(1, hexToRgba(this.color, 0));
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, glowR, 0, Math.PI * 2);
+      ctx.fill();
+    } else {
+      // 无辉光粒子：普通圆点
+      ctx.fillStyle = hexToRgba(this.color, alpha);
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, radius, 0, Math.PI * 2);
+      ctx.fill();
     }
-    ctx.fillStyle = hexToRgba(this.color, Math.max(0, alpha));
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, this.size * (0.6 + 0.4 * lifeRatio), 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
   }
 }
 
@@ -589,21 +600,16 @@ class Firework {
 
   draw(ctx) {
     if (!this.active || this.exploded) return;
-    // 火箭头部：明亮的光点带辉光
-    ctx.save();
-    ctx.shadowBlur = 15;
-    ctx.shadowColor = this.colorSet.core;
-    ctx.fillStyle = this.colorSet.core;
+    // 火箭头部：径向渐变辉光（替代shadowBlur）
+    const grad = ctx.createRadialGradient(this.x, this.y, 0, this.x, this.y, 8);
+    grad.addColorStop(0, this.colorSet.core);
+    grad.addColorStop(0.3, hexToRgba(this.colorSet.core, 0.8));
+    grad.addColorStop(0.6, hexToRgba(this.colorSet.mid, 0.4));
+    grad.addColorStop(1, hexToRgba(this.colorSet.mid, 0));
+    ctx.fillStyle = grad;
     ctx.beginPath();
-    ctx.arc(this.x, this.y, 2.5, 0, Math.PI * 2);
+    ctx.arc(this.x, this.y, 8, 0, Math.PI * 2);
     ctx.fill();
-    // 火箭外层光晕
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = hexToRgba(this.colorSet.mid, 0.4);
-    ctx.beginPath();
-    ctx.arc(this.x, this.y, 5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
   }
 }
 
@@ -785,24 +791,12 @@ class Flower {
     ctx.globalAlpha = 1;
   }
 
-  /** 绘制单片花瓣 —— 立体径向渐变 + 投影 + 层次明暗 */
+  /** 绘制单片花瓣 —— 径向渐变主体 + 简洁高光（无shadowBlur/clip，高性能） */
   drawPetal(ctx, length, width, petal) {
     const { petal: baseColor, petalEdge } = this.colorSet;
     const layer = petal.layer || 0;
-    // 内层花瓣颜色更深更饱和，外层更亮更通透，产生立体层次
     const layerDarken = 1 - layer * 0.12;
     const layerAlpha = 0.75 + layer * 0.08;
-
-    // ---- 花瓣投影（偏移右下方，营造悬浮立体感）----
-    ctx.save();
-    ctx.translate(2, 3);
-    ctx.shadowBlur = CONFIG.petalShadowBlur;
-    ctx.shadowColor = `rgba(0, 0, 0, ${CONFIG.petalShadowAlpha})`;
-    ctx.beginPath();
-    this.petalPath(ctx, length, width, petal);
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-    ctx.fill();
-    ctx.restore();
 
     // ---- 花瓣主体：径向渐变模拟光照（基部暗→中部亮→尖端微暗）----
     const grad = ctx.createRadialGradient(0, -length * 0.1, 0, 0, -length * 0.4, length);
@@ -816,38 +810,29 @@ class Flower {
     this.petalPath(ctx, length, width, petal);
     ctx.fill();
 
-    // ---- 花瓣左侧受光面高光（模拟光源从左上方照射）----
-    ctx.save();
+    // ---- 花瓣左侧受光面：用半透明白色贝塞尔曲线代替clip（性能友好）----
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
+    ctx.lineWidth = width * 0.25;
+    ctx.lineCap = 'round';
     ctx.beginPath();
-    this.petalPath(ctx, length, width, petal);
-    ctx.clip();
-    const highlightGrad = ctx.createLinearGradient(-width, 0, width * 0.3, 0);
-    highlightGrad.addColorStop(0, 'rgba(255, 255, 255, 0.22)');
-    highlightGrad.addColorStop(0.5, 'rgba(255, 255, 255, 0.06)');
-    highlightGrad.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    ctx.fillStyle = highlightGrad;
-    ctx.fillRect(-width, -length, width * 1.5, length * 1.2);
-    ctx.restore();
+    ctx.moveTo(0, -length * 0.08);
+    ctx.quadraticCurveTo(-width * 0.35, -length * 0.4, -width * 0.15, -length * 0.85);
+    ctx.stroke();
 
     // ---- 花瓣边缘透光描边 ----
-    ctx.strokeStyle = hexToRgba('#FFFFFF', 0.2);
+    ctx.strokeStyle = hexToRgba('#FFFFFF', 0.15);
     ctx.lineWidth = 0.5;
     ctx.beginPath();
     this.petalPath(ctx, length, width, petal);
     ctx.stroke();
 
-    // ---- 花瓣脉络（从基部放射，增加真实感）----
-    ctx.strokeStyle = hexToRgba(petalEdge, 0.18);
+    // ---- 单条主脉络（去掉3条，减少绘制调用）----
+    ctx.strokeStyle = hexToRgba(petalEdge, 0.15);
     ctx.lineWidth = 0.35;
-    for (let v = -1; v <= 1; v += 1) {
-      ctx.beginPath();
-      ctx.moveTo(0, -length * 0.05);
-      ctx.quadraticCurveTo(
-        width * 0.15 * v, -length * 0.45,
-        width * 0.1 * v, -length * 0.85
-      );
-      ctx.stroke();
-    }
+    ctx.beginPath();
+    ctx.moveTo(0, -length * 0.05);
+    ctx.quadraticCurveTo(width * 0.03, -length * 0.45, 0, -length * 0.85);
+    ctx.stroke();
   }
 
   /** 花瓣路径（复用，避免重复代码） */
@@ -911,15 +896,20 @@ class Flower {
       const depthAlpha = isBehind ? 0.4 : 0.85;
       const twinkle = 0.5 + 0.5 * Math.sin(this.age * op.twinkleSpeed + op.phase);
       const alpha = depthAlpha * twinkle * bloomProgress;
+      if (alpha <= 0.01) continue;
 
-      ctx.save();
-      ctx.shadowBlur = CONFIG.orbitGlow * depthScale;
-      ctx.shadowColor = this.colorSet.petalEdge;
-      ctx.fillStyle = hexToRgba(this.colorSet.petalEdge, alpha);
+      const r = op.size * depthScale;
+      const glowR = r + CONFIG.orbitGlow * 0.4 * depthScale;
+
+      // 径向渐变辉光替代shadowBlur
+      const grad = ctx.createRadialGradient(px, py, 0, px, py, glowR);
+      grad.addColorStop(0, hexToRgba(this.colorSet.petalEdge, alpha));
+      grad.addColorStop(0.4, hexToRgba(this.colorSet.petalEdge, alpha * 0.5));
+      grad.addColorStop(1, hexToRgba(this.colorSet.petalEdge, 0));
+      ctx.fillStyle = grad;
       ctx.beginPath();
-      ctx.arc(px, py, op.size * depthScale, 0, Math.PI * 2);
+      ctx.arc(px, py, glowR, 0, Math.PI * 2);
       ctx.fill();
-      ctx.restore();
     }
   }
 }
