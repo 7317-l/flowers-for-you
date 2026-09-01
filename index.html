@@ -91,6 +91,31 @@
     text-shadow: 0 0 20px rgba(255, 200, 150, 0.5);
   }
   #pauseIndicator.show { opacity: 1; }
+
+  /* 彩蛋：连续点击花朵中心5次后浮现的文字 */
+  #loveMessage {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%) scale(0.8);
+    color: #87CEEB;
+    font-size: 42px;
+    letter-spacing: 16px;
+    text-indent: 16px;
+    font-weight: 300;
+    pointer-events: none;
+    z-index: 30;
+    opacity: 0;
+    transition: opacity 1.2s ease, transform 1.2s cubic-bezier(0.22, 1, 0.36, 1);
+    text-shadow:
+      0 0 15px rgba(135, 206, 235, 0.6),
+      0 0 40px rgba(135, 206, 235, 0.3),
+      0 0 80px rgba(135, 206, 235, 0.15);
+  }
+  #loveMessage.show {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
 </style>
 </head>
 <body>
@@ -99,6 +124,7 @@
 <div id="title">烟花与花</div>
 <div id="hint">点击绽放烟花 · 空格全屏 · P 暂停</div>
 <div id="pauseIndicator">暂 停</div>
+<div id="loveMessage">我爱你</div>
 
 <script>
 'use strict';
@@ -1214,12 +1240,61 @@ function animate() {
    ★ 交互事件绑定
    ======================================================================== */
 
-// 鼠标 / 触摸点击：在点击处绽放小型烟花 + 花瓣
+/* ---- 彩蛋：连续点击花朵中心5次 ---- */
+let flowerCenterClickCount = 0;   // 连续命中花朵中心的次数
+let lastFlowerCenterClick = 0;    // 上次命中时间戳（用于超时重置）
+const FLOWER_CENTER_TIMEOUT = 3000; // 连续点击超时（毫秒），超过则重置
+let loveMessageTimer = null;
+
+/** 检测点击坐标是否落在某朵花的中心区域 */
+function isClickOnFlowerCenter(x, y) {
+  for (const flower of flowerPool) {
+    if (!flower.active) continue;
+    // 花朵中心判定半径：花朵尺寸的30%（约等于纯色花心的范围）
+    const centerRadius = flower.size * 0.35;
+    const dist = Math.hypot(x - flower.x, y - flower.y);
+    if (dist <= centerRadius) return true;
+  }
+  return false;
+}
+
+/** 显示"我爱你"文字，停留后自动淡出 */
+function showLoveMessage() {
+  const el = document.getElementById('loveMessage');
+  el.classList.add('show');
+  // 清除之前的定时器
+  if (loveMessageTimer) clearTimeout(loveMessageTimer);
+  // 4秒后淡出
+  loveMessageTimer = setTimeout(() => {
+    el.classList.remove('show');
+  }, 4000);
+}
+
+// 鼠标 / 触摸点击：在点击处绽放小型烟花 + 花瓣 + 彩蛋检测
 function handleClick(e) {
   const rect = canvas.getBoundingClientRect();
   const x = (e.clientX || (e.touches && e.touches[0].clientX)) - rect.left;
   const y = (e.clientY || (e.touches && e.touches[0].clientY)) - rect.top;
   spawnClickFirework(x, y);
+
+  // ---- 彩蛋逻辑：连续点击花朵中心5次 ----
+  const now = Date.now();
+  if (isClickOnFlowerCenter(x, y)) {
+    // 超时则重置计数
+    if (now - lastFlowerCenterClick > FLOWER_CENTER_TIMEOUT) {
+      flowerCenterClickCount = 0;
+    }
+    flowerCenterClickCount++;
+    lastFlowerCenterClick = now;
+
+    if (flowerCenterClickCount >= 5) {
+      showLoveMessage();
+      flowerCenterClickCount = 0; // 触发后重置，可再次触发
+    }
+  } else {
+    // 点击非花朵中心区域，重置连续计数
+    flowerCenterClickCount = 0;
+  }
 }
 
 canvas.addEventListener('click', handleClick);
